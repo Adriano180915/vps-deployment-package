@@ -1,6 +1,27 @@
-# 🚀 Plannerate VPS Deployment Package
+# 🚀 VPS Deployment Package
 
 Pacote completo para configuração e deploy de aplicações Laravel em VPS com Docker, Traefik e CI/CD via GitHub Actions.
+
+## 📦 Instalação Rápida
+
+```bash
+# 1. Clone o pacote
+git clone https://github.com/seu-usuario/vps-deployment-package.git
+
+# 2. Execute o instalador no seu projeto Laravel
+cd seu-projeto-laravel
+bash ../vps-deployment-package/install.sh .
+
+# 3. Copie os scripts para a VPS
+scp ../vps-deployment-package/scripts/setup-*.sh user@vps:/root/
+
+# 4. Na VPS, execute os scripts
+ssh user@vps
+bash setup-vps-new.sh
+bash setup-postgres.sh  # ou setup-mysql.sh
+```
+
+Pronto! Seus arquivos Docker e workflows estão no projeto, e a VPS está configurada.
 
 ## 📦 Conteúdo do Pacote
 
