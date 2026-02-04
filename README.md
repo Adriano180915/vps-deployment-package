@@ -69,13 +69,49 @@ vps-deployment-package/
 
 Este pacote é ideal para:
 
-✅ Deploy de aplicações Laravel em VPS
+✅ Integrar deployment em **qualquer projeto Laravel**
+✅ Configurar VPS do zero para Laravel
 ✅ Ambientes staging + production separados
 ✅ Multi-tenancy com subdomínios
 ✅ WebSockets com Laravel Reverb
 ✅ Alta disponibilidade com replicação de banco
 ✅ CI/CD automatizado via GitHub Actions
 ✅ SSL automático e gerenciamento de domínios
+
+## 💼 Como Usar
+
+### Para Novos Projetos
+
+```bash
+# 1. Criar projeto Laravel
+composer create-project laravel/laravel meu-projeto
+cd meu-projeto
+
+# 2. Adicionar pacote de deployment
+git submodule add https://github.com/callcocam/vps-deployment-package.git deployment
+
+# 3. Seguir guia de integração
+# Ver: deployment/INTEGRATION.md
+```
+
+### Para Projetos Existentes
+
+```bash
+cd meu-projeto-laravel
+
+# Adicionar pacote
+git submodule add https://github.com/callcocam/vps-deployment-package.git deployment
+
+# Copiar arquivos necessários
+cp deployment/docker/Dockerfile .
+cp deployment/docker/docker-compose.staging.yml .
+mkdir -p .github/workflows
+cp deployment/github-workflows/*.yml .github/workflows/
+
+# Personalizar para seu projeto
+vim docker-compose.staging.yml
+vim .github/workflows/deploy-staging.yml
+```
 
 ## 📋 Requisitos
 
@@ -100,20 +136,34 @@ Este pacote é ideal para:
 
 ## 🚀 Quick Start
 
-### 1. Preparar a VPS
+### Integração com Projeto Laravel
+
+**Este pacote é projetado para ser usado DENTRO do seu projeto Laravel.**
 
 ```bash
-# Conectar via SSH
+# 1. No seu projeto Laravel, adicionar como submodule
+cd seu-projeto-laravel
+git submodule add https://github.com/callcocam/vps-deployment-package.git deployment
+
+# 2. Copiar arquivos necessários
+cp deployment/docker/Dockerfile .
+cp deployment/docker/docker-compose.staging.yml .
+cp deployment/github-workflows/*.yml .github/workflows/
+
+# 3. Na VPS, fazer upload do pacote deployment
+scp -r deployment root@seu-servidor.com:/opt/vps-deployment
+
+# 4. Executar setup na VPS
 ssh root@seu-servidor.com
-
-# Fazer upload do pacote
-scp -r vps-deployment-package root@seu-servidor.com:/opt/
-
-# Acessar o servidor
-cd /opt/vps-deployment-package
+cd /opt/vps-deployment
+sudo bash scripts/setup-vps-new.sh
 ```
 
+📖 **Ver guia completo:** [INTEGRATION.md](INTEGRATION.md)
+
 ### 2. Executar Setup Completo
+
+**Na VPS:**
 
 ```bash
 # Tornar scripts executáveis
