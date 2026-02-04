@@ -1,0 +1,112 @@
+name: Build and Deploy Staging
+
+on:
+  push:
+    branches:
+      - dev
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=dev
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VITE_REVERB_APP_KEY=${{ secrets.VITE_REVERB_APP_KEY }}
+            VITE_REVERB_HOST=proplanner.plannerate.dev.br
+            VITE_REVERB_PORT=443
+            VITE_REVERB_SCHEME=wss
+            VITE_PUSHER_APP_KEY=${{ secrets.VITE_REVERB_APP_KEY }}
+            VITE_PUSHER_HOST=proplanner.plannerate.dev.br
+            VITE_PUSHER_PORT=443
+            VITE_PUSHER_SCHEME=wss
+
+      - name: Image digest
+        run: echo "Image pushed with digest ${{ steps.meta.outputs.digest }}"
+
+  deploy:
+    name: Deploy to Staging VPS
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.STAGING_VPS_HOST }}
+          username: ${{ secrets.STAGING_VPS_USER }}
+          key: ${{ secrets.STAGING_VPS_SSH_KEY }}
+          port: ${{ secrets.STAGING_VPS_PORT }}
+          script: |
+            # Navegar para o diretório do projeto
+            cd /opt/plannerate/staging
+            
+            # Login no GitHub Container Registry
+            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
+            # Exportar variável de ambiente necessária
+            export GITHUB_REPO=${{ secrets.STAGING_GITHUB_REPO }}
+            
+            # Pull das novas imagens
+            docker compose -f docker-compose.staging.yml pull
+            
+            # Subir os containers (só recria se a imagem mudou)
+            docker compose -f docker-compose.staging.yml up -d --no-build --remove-orphans
+            
+            # Aguardar containers iniciarem
+            sleep 10
+            
+            # Executar migrations
+            docker exec plannerate-app-staging php artisan migrate --force
+              
+            # Executar migrations nos bancos dos tenants
+            docker exec plannerate-app-staging php artisan tenant:migrate --force
+            
+            # Otimizar cache (config, routes, views)
+            docker exec plannerate-app-staging php artisan optimize:clear
+            docker exec plannerate-app-staging php artisan config:cache
+            #docker exec plannerate-app-staging php artisan storage:link
+            
+            # Criar diretórios necessários com permissões corretas
+            docker exec plannerate-app-staging mkdir -p /var/www/storage/app/public/imports
+            docker exec plannerate-app-staging chmod -R 775 /var/www/storage/app/public
+            docker exec plannerate-app-staging chown -R www-data:www-data /var/www/storage
+            
+            # Reiniciar queue para aplicar mudanças
+            docker compose -f docker-compose.staging.yml restart queue
+            
+            # Limpar imagens antigas (economizar espaço)
+            docker image prune -f
+            
+            echo "✅ Deploy concluído com sucesso!"

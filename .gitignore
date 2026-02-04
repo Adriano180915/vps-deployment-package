@@ -1,0 +1,84 @@
+# ============================================
+# VPS Deployment Package - .gitignore
+# ============================================
+
+# Arquivos de credenciais (NUNCA COMMITAR!)
+*.credentials
+*-credentials
+.env*
+!.env.example
+
+# Chaves SSH
+*.pem
+*.key
+id_rsa*
+*.pub
+authorized_keys
+
+# Arquivos de configuração local
+config/local.*
+*.local
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Backups
+backups/
+*.sql
+*.sql.gz
+*.dump
+*.backup
+
+# Docker volumes e cache
+.docker/
+docker-volumes/
+.dockerignore
+
+# Arquivos temporários
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Diretórios de build
+dist/
+build/
+node_modules/
+vendor/
+
+# IDE e editores
+.vscode/
+.idea/
+*.sublime-*
+*.code-workspace
+
+# Certificados SSL
+*.crt
+*.pem
+*.cer
+acme.json
+letsencrypt/
+
+# Arquivos de sistema
+.Trash-*
+.nfs*
+
+# Arquivos específicos do servidor
+traefik-config/
+postgres-data/
+mysql-data/
+redis-data/
+
+# Arquivos de debug
+debug-info.txt
+*.debug
+
+# Arquivos compactados (se forem grandes)
+# *.tar.gz
+# *.zip
+# *.tar

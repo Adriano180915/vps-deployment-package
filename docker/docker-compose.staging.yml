@@ -1,0 +1,269 @@
+services:
+  # ============================================
+  # Aplicação Laravel + Nginx
+  # ============================================
+  app:
+    image: ghcr.io/${GITHUB_REPO}:dev
+    container_name: plannerate-app-staging
+    restart: always
+    
+    volumes:
+      - ./.env:/var/www/.env:ro
+      - storage-data:/var/www/storage/app/public
+      - ./php-config/memory-limit.ini:/usr/local/etc/php/conf.d/memory-limit.ini:ro
+    
+    networks:
+      - plannerate-staging
+      - traefik-global
+    
+    environment:
+      - VITE_REVERB_HOST=${VITE_REVERB_HOST:-proplanner.${DOMAIN:-plannerate.dev.br}}
+      - VITE_REVERB_PORT=${VITE_REVERB_PORT:-443}
+      - VITE_REVERB_SCHEME=${VITE_REVERB_SCHEME:-wss}
+      - VITE_REVERB_APP_KEY=${VITE_REVERB_APP_KEY}
+    
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 512M
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/up"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-global"
+      
+      # Router para aplicação principal - Múltiplos domínios
+      - "traefik.http.routers.staging-app.rule=Host(`${DOMAIN:-plannerate.dev.br}`) || HostRegexp(`{subdomain:[a-z0-9-]+}.${DOMAIN:-plannerate.dev.br}`) || Host(`plannerate.xyz`) || HostRegexp(`{subdomain:[a-z0-9-]+}.plannerate.xyz`)"
+      - "traefik.http.routers.staging-app.entrypoints=websecure"
+      - "traefik.http.routers.staging-app.tls.certresolver=letsencrypt"
+      
+      # Certificados SSL - Domínio primário
+      - "traefik.http.routers.staging-app.tls.domains[0].main=${DOMAIN:-plannerate.dev.br}"
+      - "traefik.http.routers.staging-app.tls.domains[0].sans=*.${DOMAIN:-plannerate.dev.br}"
+      
+      # Certificados SSL - Domínios adicionais (plannerate.xyz)
+      - "traefik.http.routers.staging-app.tls.domains[1].main=plannerate.xyz"
+      - "traefik.http.routers.staging-app.tls.domains[1].sans=*.plannerate.xyz"
+      
+      - "traefik.http.routers.staging-app.priority=10"
+      - "traefik.http.routers.staging-app.service=staging-app"
+      - "traefik.http.services.staging-app.loadbalancer.server.port=80"
+      - "traefik.http.middlewares.staging-security.headers.browserXssFilter=true"
+      - "traefik.http.middlewares.staging-security.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.staging-security.headers.forceSTSHeader=true"
+      - "traefik.http.middlewares.staging-security.headers.stsSeconds=31536000"
+      - "traefik.http.routers.staging-app.middlewares=staging-security"
+    
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # Reverb roda dentro do container do app (Supervisor): mesma origem, wss://HOST/app/KEY
+
+  # ============================================
+  # PostgreSQL - SERVIDOR EXTERNO
+  # ============================================
+  # O PostgreSQL agora roda em um servidor externo (192.168.2.106)
+  # com replicação (1 primário + 2 réplicas).
+  # Configuração em: postgres-replicas/
+  # 
+  # Para conectar, configure no .env.staging:
+  # DB_HOST=192.168.2.106
+  # DB_PORT=5432
+  # DB_DATABASE=plannerate_staging
+  # DB_USERNAME=replicator
+  # DB_PASSWORD=replicator_password
+  # ============================================
+
+  # ============================================
+  # Redis Cache & Queue
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: plannerate-redis-staging
+    restart: unless-stopped
+    
+    command: >
+      redis-server
+      --appendonly yes
+      ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
+      --maxmemory 3gb
+      --maxmemory-policy allkeys-lru
+      --save 900 1 300 10 60 10000
+      --auto-aof-rewrite-percentage 100
+      --auto-aof-rewrite-min-size 1gb
+    
+    volumes:
+      - redis_data:/data
+    
+    networks:
+      - plannerate-staging
+    
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ${REDIS_PASSWORD:+-a $REDIS_PASSWORD} ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+          cpus: '2'
+        reservations:
+          memory: 1G
+
+  # ============================================
+  # Reverb roda dentro do container do app (Supervisor); Nginx faz proxy de /app para Reverb (porta 8080)
+  # ============================================
+
+  # ============================================
+  # pgAdmin (Database Management)
+  # ============================================
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: plannerate-pgadmin-staging
+    restart: unless-stopped
+    
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-callcocam@gmail.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+      PGADMIN_CONFIG_SERVER_MODE: 'True'
+      PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION: 'False'
+      PGADMIN_CONFIG_COOKIE_SAMESITE: "'Lax'"
+    
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    
+    networks:
+      - plannerate-staging
+      - traefik-global
+    
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-global"
+      - "traefik.http.routers.staging-pgadmin.rule=Host(`pgadmin.${DOMAIN:-plannerate.dev.br}`) || Host(`pgadmin.plannerate.xyz`)"
+      - "traefik.http.routers.staging-pgadmin.entrypoints=websecure"
+      - "traefik.http.routers.staging-pgadmin.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.staging-pgadmin.tls.domains[0].main=pgadmin.${DOMAIN:-plannerate.dev.br}"
+      - "traefik.http.routers.staging-pgadmin.tls.domains[1].main=pgadmin.plannerate.xyz"
+      - "traefik.http.routers.staging-pgadmin.priority=50"
+      - "traefik.http.services.staging-pgadmin.loadbalancer.server.port=80"
+    # Conecta ao PostgreSQL externo (192.168.2.106)
+    # Servidor: 192.168.2.106
+    # Database: plannerate_staging
+    # User: replicator
+    # Password: replicator_password
+
+  # ============================================
+  # Horizon Queue Worker (Laravel)
+  # ============================================
+  queue:
+    image: ghcr.io/${GITHUB_REPO}:dev
+    container_name: plannerate-queue-staging
+    restart: always
+    
+    volumes:
+      - ./.env:/var/www/.env:ro
+      - storage-data:/var/www/storage/app/public
+      - ./php-config/memory-limit.ini:/usr/local/etc/php/conf.d/memory-limit.ini:ro
+    
+    networks:
+      - plannerate-staging
+    
+    environment:
+      - PHP_MEMORY_LIMIT=2048M
+    
+    command: php artisan horizon
+    
+    healthcheck:
+      test: ["CMD-SHELL", "php artisan horizon:status || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 512M
+    
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # ============================================
+  # Scheduler (Laravel Cron)
+  # ============================================
+  scheduler:
+    image: ghcr.io/${GITHUB_REPO}:dev
+    container_name: plannerate-scheduler-staging
+    restart: always
+    
+    volumes:
+      - ./.env:/var/www/.env:ro
+      - ./php-config/memory-limit.ini:/usr/local/etc/php/conf.d/memory-limit.ini:ro
+    
+    networks:
+      - plannerate-staging
+    
+    command: >
+      sh -c "while true; do
+        php artisan schedule:run --verbose --no-interaction
+        sleep 60
+      done"
+    
+    healthcheck:
+      test: ["CMD-SHELL", "php -r \"echo 'ok';\" || exit 1"]
+      interval: 60s
+      timeout: 5s
+      retries: 2
+      start_period: 10s
+    
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+    
+    depends_on:
+      redis:
+        condition: service_healthy
+
+# ============================================
+# Networks
+# ============================================
+networks:
+  plannerate-staging:
+    driver: bridge
+    name: plannerate-staging
+  
+  traefik-global:
+    external: true
+
+# ============================================
+# Volumes (Persistência de Dados)
+# ============================================
+volumes:
+  # postgres_data removido - PostgreSQL agora é externo (192.168.2.106)
+  redis_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+  storage-data:
+    driver: local
