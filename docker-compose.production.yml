@@ -1,0 +1,191 @@
+services:
+  # ============================================
+  # Aplicação Laravel + Nginx
+  # ============================================
+  app:
+    image: ghcr.io/${GITHUB_REPO}:main
+    container_name: app-prod
+    restart: always
+    
+    volumes:
+      - ./.env:/var/www/.env
+    
+    networks:
+      - app-network
+      - traefik-global
+    
+    environment:
+      - VITE_PUSHER_APP_KEY=${VITE_PUSHER_APP_KEY}
+      - VITE_PUSHER_APP_CLUSTER=${VITE_PUSHER_APP_CLUSTER:-mt1}
+      - VITE_PUSHER_PORT=${VITE_PUSHER_PORT:-443}
+      - VITE_PUSHER_SCHEME=${VITE_PUSHER_SCHEME:-https}
+    
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-global"
+      
+      # Router para aplicação principal
+      - "traefik.http.routers.prod-app.rule=Host(`${DOMAIN}`) || HostRegexp(`{subdomain:[a-z0-9-]+}.${DOMAIN}`)"
+      - "traefik.http.routers.prod-app.entrypoints=websecure"
+      - "traefik.http.routers.prod-app.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.prod-app.tls.domains[0].main=${DOMAIN}"
+      - "traefik.http.routers.prod-app.tls.domains[0].sans=*.${DOMAIN}"
+      - "traefik.http.routers.prod-app.priority=10"
+      - "traefik.http.services.prod-app.loadbalancer.server.port=80"
+      
+      # Security headers
+      - "traefik.http.middlewares.prod-security.headers.browserXssFilter=true"
+      - "traefik.http.middlewares.prod-security.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.prod-security.headers.forceSTSHeader=true"
+      - "traefik.http.middlewares.prod-security.headers.stsSeconds=31536000"
+      - "traefik.http.routers.prod-app.middlewares=prod-security"
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/up"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    
+    depends_on:
+      redis:
+        condition: service_healthy
+    
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ============================================
+  # MySQL - INSTALADO LOCALMENTE NA VPS
+  # ============================================
+  # O MySQL foi instalado diretamente na VPS.
+  # Conecta via host.docker.internal ou IP da máquina
+  # 
+  # Para conectar do container, use no .env:
+  # DB_HOST=host.docker.internal (ou IP da máquina)
+  # DB_PORT=3306
+  # ============================================
+
+  # ============================================
+  # Redis Cache & Queue
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: redis-prod
+    restart: unless-stopped
+    
+    command: >
+      redis-server
+      --appendonly yes
+      ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
+      --maxmemory 4gb
+      --maxmemory-policy allkeys-lru
+      --save 900 1 300 10 60 10000
+      --auto-aof-rewrite-percentage 100
+      --auto-aof-rewrite-min-size 1gb
+    
+    volumes:
+      - redis_data:/data
+    
+    networks:
+      - app-network
+    
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ============================================
+  # Broadcasting - PUSHER (Configurado via .env)
+  # ============================================
+  # Reverb foi removido. Usando Pusher em produção.
+  # Configure no .env:
+  # BROADCAST_CONNECTION=pusher
+  # PUSHER_APP_ID=
+  # PUSHER_APP_KEY=
+  # PUSHER_APP_SECRET=
+  # PUSHER_APP_CLUSTER=mt1
+  # ============================================
+
+  # ============================================
+  # Queue Worker (Laravel Horizon)
+  # ============================================
+  queue:
+    image: ghcr.io/${GITHUB_REPO}:main
+    container_name: queue-prod
+    restart: always
+    
+    volumes:
+      - ./.env:/var/www/.env
+    
+    networks:
+      - app-network
+    
+    command: php artisan horizon
+    
+    healthcheck:
+      test: ["CMD-SHELL", "php -r \"echo 'ok';\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    
+    depends_on:
+      redis:
+        condition: service_healthy
+    
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ============================================
+  # Scheduler (Laravel Cron)
+  # ============================================
+  scheduler:
+    image: ghcr.io/${GITHUB_REPO}:main
+    container_name: scheduler-prod
+    restart: always
+    
+    volumes:
+      - ./.env:/var/www/.env
+    
+    networks:
+      - app-network
+    
+    command: >
+      sh -c "while true; do
+        php artisan schedule:run --verbose --no-interaction &
+        sleep 60
+      done"
+    
+    healthcheck:
+      test: ["CMD-SHELL", "php -r \"echo 'ok';\" || exit 1"]
+      interval: 60s
+      timeout: 5s
+      retries: 2
+      start_period: 10s
+    
+    depends_on:
+      redis:
+        condition: service_healthy
+    
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+# ============================================
+# Networks
+# ============================================
+networks:
+  app-network:
+    driver: bridge
+    name: app-network
+  
+  traefik-global:
+    external: true
+
+# ============================================
+# Volumes
+# ============================================
+volumes:
+  redis_data:
+    driver: local
