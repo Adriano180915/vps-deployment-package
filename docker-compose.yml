@@ -1,3 +1,5 @@
+# Production compose – usado pelo workflow e na VPS (/opt/production).
+# Nome: docker-compose.yml (na VPS o workflow usa: docker compose -f docker-compose.yml)
 services:
   # ============================================
   # Aplicação Laravel + Nginx
@@ -57,12 +59,7 @@ services:
   # ============================================
   # MySQL - INSTALADO LOCALMENTE NA VPS
   # ============================================
-  # O MySQL foi instalado diretamente na VPS.
-  # Conecta via host.docker.internal ou IP da máquina
-  # 
-  # Para conectar do container, use no .env:
-  # DB_HOST=host.docker.internal (ou IP da máquina)
-  # DB_PORT=3306
+  # DB_HOST=host.docker.internal (ou IP da máquina), DB_PORT=3306 no .env
   # ============================================
 
   # ============================================
@@ -95,18 +92,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
-
-  # ============================================
-  # Broadcasting - PUSHER (Configurado via .env)
-  # ============================================
-  # Reverb foi removido. Usando Pusher em produção.
-  # Configure no .env:
-  # BROADCAST_CONNECTION=pusher
-  # PUSHER_APP_ID=
-  # PUSHER_APP_KEY=
-  # PUSHER_APP_SECRET=
-  # PUSHER_APP_CLUSTER=mt1
-  # ============================================
 
   # ============================================
   # Queue Worker (Laravel Horizon)
